@@ -261,6 +261,89 @@ def finding_new_customer_repeat(
     ]
 
 
+def finding_high_cancellation_rate(
+    daily_df: pd.DataFrame,
+    date_col: str,
+    cancellations_col: str,
+    bookings_col: str,
+    threshold_ratio: float = 1.8,
+    min_rate: float = 0.20,
+) -> list[Finding]:
+    """
+    Flags a calendar month where the cancellation rate spiked well above
+    the overall average -- distinct from a single-day z-score anomaly,
+    this catches a sustained multi-day/week problem (a weather warning,
+    an OTA policy issue, etc.) that a daily check alone would smear out.
+    """
+    tmp = daily_df[[date_col, cancellations_col, bookings_col]].dropna().copy()
+    if tmp.empty:
+        return []
+    monthly = tmp.set_index(date_col).resample("MS").sum()
+    denom = monthly[bookings_col] + monthly[cancellations_col]
+    monthly_rate = (monthly[cancellations_col] / denom.replace(0, pd.NA)).dropna()
+    if monthly_rate.empty:
+        return []
+
+    overall_denom = tmp[bookings_col].sum() + tmp[cancellations_col].sum()
+    overall_rate = tmp[cancellations_col].sum() / overall_denom if overall_denom else 0
+
+    threshold = max(min_rate, overall_rate * threshold_ratio)
+    hot_months = monthly_rate[monthly_rate >= threshold]
+    if hot_months.empty:
+        return []
+
+    worst_month = hot_months.idxmax()
+    worst_rate = hot_months.max()
+    return [
+        Finding(
+            title=f"{worst_month:%Y-%m}にキャンセル率が急上昇",
+            detail=f"{worst_month:%Y-%m}のキャンセル率は{worst_rate:.1%}（全期間平均は{overall_rate:.1%}）。",
+            recommendation=(
+                "該当月の気象・OTAキャンペーン等の外部要因を確認し、"
+                "キャンセルポリシーや予約確定プロセス（デポジット等）の見直しを検討。"
+            ),
+            severity="critical",
+            tags=["hotel", "cancellation"],
+        )
+    ]
+
+
+def finding_weekday_occupancy_gap(
+    daily_df: pd.DataFrame,
+    date_col: str,
+    occupancy_col: str,
+    weekend_days: tuple[str, ...] = ("Friday", "Saturday"),
+    gap_threshold: float = 0.15,
+) -> list[Finding]:
+    """
+    Flags a large weekday/weekend occupancy gap -- a classic hotel
+    revenue-management signal that midweek demand generation (corporate
+    rates, weekday packages) is underused relative to weekend demand.
+    """
+    tmp = daily_df[[date_col, occupancy_col]].dropna().copy()
+    if tmp.empty:
+        return []
+    tmp["weekday"] = tmp[date_col].dt.day_name()
+    is_weekend = tmp["weekday"].isin(weekend_days)
+    weekend_avg = tmp.loc[is_weekend, occupancy_col].mean()
+    weekday_avg = tmp.loc[~is_weekend, occupancy_col].mean()
+    if pd.isna(weekend_avg) or pd.isna(weekday_avg):
+        return []
+
+    gap = weekend_avg - weekday_avg
+    if gap < gap_threshold:
+        return []
+    return [
+        Finding(
+            title="平日と週末の稼働率に大きな差",
+            detail=f"週末平均稼働率{weekend_avg:.1%}に対し、平日平均稼働率は{weekday_avg:.1%}（差{gap:.1%}pt）。",
+            recommendation="平日需要の底上げ（法人向け割引プラン、連泊割引、ワーケーションプラン等）を検討。",
+            severity="info",
+            tags=["hotel", "weekday", "occupancy"],
+        )
+    ]
+
+
 def to_markdown(findings: list[Finding]) -> str:
     """Render findings as a Markdown report (used by the Streamlit apps and for exports)."""
     if not findings:

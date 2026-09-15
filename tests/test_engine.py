@@ -115,3 +115,34 @@ def test_quadrant_classify_custom_labels():
     labels = stats.quadrant_classify(df, "x", "y", labels={"good": "GOOD", "needs_work": "BAD"})
     assert labels["hi"] == "GOOD"
     assert labels["lo"] == "BAD"
+
+
+def test_finding_high_cancellation_rate_flags_spike_month():
+    dates = pd.date_range("2026-01-01", "2026-04-30", freq="D")
+    df = pd.DataFrame({"date": dates, "rooms_sold": 50, "cancellations": 4})
+    # March: a sustained cancellation spike
+    march_mask = dates.month == 3
+    df.loc[march_mask, "cancellations"] = 40
+    findings = insights.finding_high_cancellation_rate(df, "date", "cancellations", "rooms_sold")
+    assert len(findings) == 1
+    assert "2026-03" in findings[0].title
+
+
+def test_finding_high_cancellation_rate_no_flag_when_stable():
+    dates = pd.date_range("2026-01-01", "2026-04-30", freq="D")
+    df = pd.DataFrame({"date": dates, "rooms_sold": 50, "cancellations": 4})
+    assert insights.finding_high_cancellation_rate(df, "date", "cancellations", "rooms_sold") == []
+
+
+def test_finding_weekday_occupancy_gap_flags_large_gap():
+    dates = pd.date_range("2026-01-01", periods=28, freq="D")
+    occ = [0.9 if d.day_name() in ("Friday", "Saturday") else 0.4 for d in dates]
+    df = pd.DataFrame({"date": dates, "occupancy_rate": occ})
+    findings = insights.finding_weekday_occupancy_gap(df, "date", "occupancy_rate")
+    assert len(findings) == 1
+
+
+def test_finding_weekday_occupancy_gap_no_flag_when_even():
+    dates = pd.date_range("2026-01-01", periods=28, freq="D")
+    df = pd.DataFrame({"date": dates, "occupancy_rate": 0.6})
+    assert insights.finding_weekday_occupancy_gap(df, "date", "occupancy_rate") == []

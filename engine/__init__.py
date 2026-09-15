@@ -16,6 +16,6 @@ calls out to a language model if you explicitly ask for it and provide a
 key; otherwise it falls back to a template-based Japanese narrative.
 """
 
-from . import stats, insights, llm  # noqa: F401
+from . import stats, insights, llm, rfm, forecast  # noqa: F401
 
-__all__ = ["stats", "insights", "llm"]
+__all__ = ["stats", "insights", "llm", "rfm", "forecast"]
