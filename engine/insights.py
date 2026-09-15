@@ -344,6 +344,84 @@ def finding_weekday_occupancy_gap(
     ]
 
 
+def finding_checkout_slump(
+    match_df: pd.DataFrame,
+    date_col: str,
+    hits_col: str,
+    attempts_col: str,
+    threshold_ratio: float = 0.6,
+    min_attempts: int = 5,
+) -> list[Finding]:
+    """
+    Flags a calendar month where a success rate (e.g. a darts checkout
+    percentage) collapsed well below the overall average -- the mirror
+    image of finding_high_cancellation_rate: here a LOW rate is the
+    problem. Requires at least `min_attempts` that month so a couple of
+    unlucky misses in a quiet month don't trigger a false alarm.
+    """
+    tmp = match_df[[date_col, hits_col, attempts_col]].dropna().copy()
+    if tmp.empty:
+        return []
+    monthly = tmp.set_index(date_col).resample("MS").sum()
+    monthly = monthly[monthly[attempts_col] >= min_attempts]
+    if monthly.empty:
+        return []
+    monthly_rate = monthly[hits_col] / monthly[attempts_col]
+
+    overall_denom = tmp[attempts_col].sum()
+    overall_rate = tmp[hits_col].sum() / overall_denom if overall_denom else 0
+    if overall_rate == 0:
+        return []
+
+    threshold = overall_rate * threshold_ratio
+    slump_months = monthly_rate[monthly_rate <= threshold]
+    if slump_months.empty:
+        return []
+
+    worst_month = slump_months.idxmin()
+    worst_rate = slump_months.min()
+    return [
+        Finding(
+            title=f"{worst_month:%Y-%m}にチェックアウト成功率が大きく落ち込み",
+            detail=f"{worst_month:%Y-%m}の成功率は{worst_rate:.1%}（全期間平均は{overall_rate:.1%}）。",
+            recommendation="該当期間の心理的プレッシャー（大会等）や体調・練習量の変化を振り返り、フィニッシュ練習を重点的に行うことを検討。",
+            severity="warning",
+            tags=["darts", "checkout"],
+        )
+    ]
+
+
+def finding_toughest_rival(
+    opponent_summary: pd.DataFrame,
+    matches_col: str = "matches",
+    win_rate_col: str = "win_rate",
+    min_matches: int = 5,
+    win_rate_threshold: float = 0.40,
+) -> list[Finding]:
+    """
+    Flags a frequently-played opponent the player has a losing record
+    against -- a "nemesis" pattern worth targeted practice, as distinct
+    from an occasional opponent who's simply stronger (too few matches
+    to act on with confidence).
+    """
+    candidates = opponent_summary[
+        (opponent_summary[matches_col] >= min_matches) & (opponent_summary[win_rate_col] < win_rate_threshold)
+    ]
+    if candidates.empty:
+        return []
+    worst = candidates.sort_values(win_rate_col).index[0]
+    row = candidates.loc[worst]
+    return [
+        Finding(
+            title=f"{worst}に対して勝率が低い（苦手な相手）",
+            detail=f"{worst}とは{int(row[matches_col])}試合対戦し、勝率は{row[win_rate_col]:.1%}。",
+            recommendation=f"{worst}との対戦を振り返り、弱点（フィニッシュ・序盤の入り方等）を重点的に練習することを検討。",
+            severity="warning",
+            tags=["darts", "opponent"],
+        )
+    ]
+
+
 def to_markdown(findings: list[Finding]) -> str:
     """Render findings as a Markdown report (used by the Streamlit apps and for exports)."""
     if not findings:

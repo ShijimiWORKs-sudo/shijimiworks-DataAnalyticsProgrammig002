@@ -146,3 +146,34 @@ def test_finding_weekday_occupancy_gap_no_flag_when_even():
     dates = pd.date_range("2026-01-01", periods=28, freq="D")
     df = pd.DataFrame({"date": dates, "occupancy_rate": 0.6})
     assert insights.finding_weekday_occupancy_gap(df, "date", "occupancy_rate") == []
+
+
+def test_finding_checkout_slump_flags_collapsed_month():
+    dates = pd.date_range("2026-01-01", "2026-04-30", freq="D")
+    df = pd.DataFrame({"date": dates, "checkout_hits": 3, "checkout_attempts": 8})
+    march_mask = dates.month == 3
+    df.loc[march_mask, ["checkout_hits", "checkout_attempts"]] = [1, 10]
+    findings = insights.finding_checkout_slump(df, "date", "checkout_hits", "checkout_attempts")
+    assert len(findings) == 1
+    assert "2026-03" in findings[0].title
+
+
+def test_finding_checkout_slump_no_flag_when_stable():
+    dates = pd.date_range("2026-01-01", "2026-04-30", freq="D")
+    df = pd.DataFrame({"date": dates, "checkout_hits": 3, "checkout_attempts": 8})
+    assert insights.finding_checkout_slump(df, "date", "checkout_hits", "checkout_attempts") == []
+
+
+def test_finding_toughest_rival_flags_frequent_losing_matchup():
+    summary = pd.DataFrame(
+        {"matches": [20, 3, 10], "win_rate": [0.20, 0.10, 0.60]},
+        index=["nemesis", "rare_opponent", "easy_opponent"],
+    )
+    findings = insights.finding_toughest_rival(summary)
+    assert len(findings) == 1
+    assert "nemesis" in findings[0].title
+
+
+def test_finding_toughest_rival_ignores_infrequent_opponent():
+    summary = pd.DataFrame({"matches": [3], "win_rate": [0.0]}, index=["rare_opponent"])
+    assert insights.finding_toughest_rival(summary) == []
